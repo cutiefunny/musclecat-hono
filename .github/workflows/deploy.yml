@@ -12,23 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     name: Deploy
     steps:
-      # 1. 저장소 코드 체크아웃
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Node.js 설정 (패키지 설치를 위해)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. 의존성 설치 (npm install)
       - name: Install Dependencies
         run: npm ci
 
-      # 4. Cloudflare Workers로 배포
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # wrangler.toml 파일을 자동으로 감지하여 배포합니다.

@@ -1,74 +1,69 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
-// Hono 앱 인스턴스 생성
 const app = new Hono()
 
-// 1. 미들웨어: CORS 설정 (모든 도메인 허용)
+// 1. 미들웨어: CORS 설정
 app.use('/*', cors())
 
 // 2. 기본 라우트
 app.get('/', (c) => {
-  return c.text('Hello! This is pure JavaScript on Cloudflare Workers.')
+  return c.text('Hello! This is pure JavaScript on Cloudflare Workers with Gemini.')
 })
 
-// 3. [신규 기능] 포춘쿠키 API (외부 API 연동 실습)
+// 3. [핵심] 포춘쿠키 + Gemini 번역 API
 app.get('/fortune', async (c) => {
-  // 3-1. 쿼리 파라미터로 언어 선택 (기본값: english) -> ?lang=kr
-  const lang = c.req.query('lang') || 'english'
-
+  const API_KEY = c.env.GOOGLE_API_KEY
+  
   try {
-    let message = ''
-    let source = ''
+    // 1단계: 영어 명언 가져오기 (Advice Slip API)
+    const adviceResponse = await fetch('https://api.adviceslip.com/advice')
+    if (!adviceResponse.ok) throw new Error('Advice API Error')
+    const adviceData = await adviceResponse.json()
+    const originalText = adviceData.slip.advice
 
-    if (lang === 'kr') {
-      // 한국어: 내부 백업 데이터 사용 (연습용)
-      const backups = [
-        "시작이 반이다.",
-        "피할 수 없으면 즐겨라.",
-        "행운은 용기를 뒤따른다.",
-        "오늘의 노력이 내일의 결실을 맺는다.",
-        "당신은 충분히 잘하고 있다."
-      ]
-      message = backups[Math.floor(Math.random() * backups.length)]
-      source = 'Local Backup (Korean)'
-    } else {
-      // 영어: 외부 API (Advice Slip) 호출
-      // Cloudflare Workers에서는 fetch가 내장되어 있어 별도 import가 필요 없습니다.
-      const response = await fetch('https://api.adviceslip.com/advice')
-      
-      if (!response.ok) {
-        throw new Error('External API Error')
-      }
-
-      const data = await response.json()
-      message = data.slip.advice
-      source = 'Advice Slip API'
+    // 2단계: Gemini에게 번역 요청
+    // 모델: gemini-2.5-flash-lite (속도가 빠르고 비용 효율적임)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${API_KEY}`
+    
+    const geminiBody = {
+      contents: [{
+        parts: [{
+          // 단순 직역보다 '한 줄 운세'처럼 번역하도록 지시
+          text: `Translate the following sentence into Korean efficiently and naturally, like a one-line fortune. Output only the Korean text without quotes.\n\nSentence: "${originalText}"`
+        }]
+      }]
     }
 
-    // JSON 응답 반환
-    return c.json({
-      success: true,
-      data: {
-        message: message,
-        language: lang,
-        source: source
-      },
-      timestamp: new Date().toISOString()
+    const geminiResponse = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(geminiBody)
     })
 
+    if (!geminiResponse.ok) {
+      const errText = await geminiResponse.text()
+      throw new Error(`Gemini API Error: ${errText}`)
+    }
+
+    const geminiData = await geminiResponse.json()
+    
+    // 응답에서 텍스트 추출
+    const koreanMessage = geminiData.candidates[0].content.parts[0].text.trim()
+
+    // 3단계: 결과 반환 (한국어 메시지만)
+    return c.text(koreanMessage)
+
   } catch (err) {
-    // 에러 발생 시 처리
-    console.error('Fortune Error:', err)
-    return c.json({
-      success: false,
-      error: '포춘쿠키를 가져오는 데 실패했습니다.',
-      details: err.message
+    console.error(err)
+    return c.json({ 
+      error: '명언을 가져오는 중 문제가 발생했습니다.',
+      detail: err.message 
     }, 500)
   }
 })
 
-// 4. 기존: JSON 반환 및 파라미터 처리
+// 4. 기존 사용자 조회 API (유지)
 app.get('/users/:id', (c) => {
   const userId = c.req.param('id')
   const userRole = c.req.query('role') || 'member'
@@ -81,24 +76,16 @@ app.get('/users/:id', (c) => {
   })
 })
 
-// 5. 기존: POST 요청 처리
+// 5. POST 요청 처리 (유지)
 app.post('/api/data', async (c) => {
   try {
     const body = await c.req.json()
-    
-    return c.json({
-      success: true,
-      received: body
-    }, 201)
+    return c.json({ success: true, received: body }, 201)
   } catch (err) {
     return c.json({ error: 'Invalid JSON' }, 400)
   }
 })
 
-// 6. 404 에러 처리
-app.notFound((c) => {
-  return c.json({ error: 'Not Found' }, 404)
-})
+app.notFound((c) => c.json({ error: 'Not Found' }, 404))
 
-// 중요: 'export default app' 문법은 Cloudflare Workers의 표준입니다.
 export default app

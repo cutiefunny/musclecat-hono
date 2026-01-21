@@ -11,33 +11,55 @@ app.get('/', (c) => {
 })
 
 app.all('/api/*', async (c) => {
-  // 1. 내 FastAPI 서버 주소 (http여도 상관없음)
-  const FASTAPI_URL = "http://210.114.17.65:8001/"; // 개발자님의 리눅스 서버 IP로 변경
+  // ⚠️ 실제 리눅스 서버 IP로 꼭 변경해주세요!
+  const FASTAPI_URL = "http://210.114.17.65:8001"; 
   
-  // 2. 요청 경로 재구성
-  // 예: Hono로 "/api/users" 요청이 오면 -> FastAPI "/users"로 보낼지, "/api/users"로 보낼지 결정
-  // 여기서는 "/api"를 그대로 유지해서 보낸다고 가정합니다.
   const url = new URL(c.req.url);
-  const targetUrl = `${FASTAPI_URL}${url.pathname}${url.search}`;
+  
+  // "/api" 제거 로직
+  const newPath = url.pathname.replace(/^\/api/, '');
+  
+  // 최종 타겟 URL 생성
+  const targetUrl = `${FASTAPI_URL}${newPath}${url.search}`;
 
-  // 3. FastAPI로 요청 전달 (Proxy)
+  // 👉 [요청하신 기능] 실제 요청 주소를 콘솔에 출력
+  console.log(`📡 [Proxy Log] 유저 요청: ${url.pathname} --> FastAPI 전달: ${targetUrl}`);
+
   try {
-    const response = await fetch(targetUrl, {
+    const fetchOptions = {
       method: c.req.method,
-      headers: c.req.header(), // 클라이언트가 보낸 헤더(인증 등) 그대로 전달
-      body: c.req.raw ? c.req.raw : null, // POST Body가 있다면 전달
-    });
+      headers: c.req.header(),
+    };
 
-    // 4. FastAPI의 응답을 그대로 클라이언트에게 반환
-    // (여기서 Hono의 CORS 미들웨어가 자동으로 CORS 헤더를 붙여줍니다)
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      fetchOptions.body = c.req.raw;
+    }
+
+    const response = await fetch(targetUrl, fetchOptions);
+
     return new Response(response.body, {
       status: response.status,
       headers: response.headers,
     });
-    
   } catch (error) {
-    console.error("FastAPI Proxy Error:", error);
-    return c.json({ error: "Backend Server Error" }, 502);
+    console.error("❌ FastAPI Proxy Error:", error);
+    return c.json({ error: "Backend Server Error", details: error.message }, 502);
+  }
+});
+
+// 5. [신규] Swagger UI 문제 해결 (openapi.json 프록시)
+// 브라우저가 /openapi.json을 루트에서 찾을 때 FastAPI로 연결해줍니다.
+app.get('/openapi.json', async (c) => {
+  const FASTAPI_URL = "http://210.114.17.65:8001"; // 위와 동일한 IP
+  const targetUrl = `${FASTAPI_URL}/openapi.json`;
+  
+  console.log(`📡 [Swagger Log] openapi.json 요청 --> ${targetUrl}`);
+
+  try {
+    const response = await fetch(targetUrl);
+    return new Response(response.body, { status: response.status, headers: response.headers });
+  } catch (e) {
+    return c.json({ error: "OpenAPI Fetch Error" }, 500);
   }
 });
 

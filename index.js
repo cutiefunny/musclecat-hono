@@ -11,24 +11,42 @@ app.get('/', (c) => {
 })
 
 app.all('/api/*', async (c) => {
-  // ⚠️ 실제 리눅스 서버 IP로 꼭 변경해주세요!
-  const FASTAPI_URL = "http://musclecat3.cafe24.com:8001"; 
+  // Cafe24 호스팅 주소 (끝에 / 없음)
+  const FASTAPI_HOST = "http://musclecat3.cafe24.com:8001"; 
   
   const url = new URL(c.req.url);
-  
-  // "/api" 제거 로직
+  // /api를 제거하고 FastAPI 경로로 변환
   const newPath = url.pathname.replace(/^\/api/, '');
-  
-  // 최종 타겟 URL 생성
-  const targetUrl = `${FASTAPI_URL}${newPath}${url.search}`;
+  const targetUrl = `${FASTAPI_HOST}${newPath}${url.search}`;
 
-  // 👉 [요청하신 기능] 실제 요청 주소를 콘솔에 출력
-  console.log(`📡 [Proxy Log] 유저 요청: ${url.pathname} --> FastAPI 전달: ${targetUrl}`);
+  console.log(`📡 [Proxy Log] ${url.pathname} --> ${targetUrl}`);
 
   try {
+    // 1. 클라이언트의 헤더를 가져옵니다.
+    const headers = new Headers(c.req.header());
+
+    // 2. [핵심] Cafe24 서버를 속이기 위한 '스텔스' 헤더 설정
+    // (1) 호스트 설정 (필수)
+    headers.set('Host', new URL(FASTAPI_HOST).host);
+    
+    // (2) 출처 위장 (Hotlink 차단 우회)
+    headers.set('Origin', FASTAPI_HOST);
+    headers.set('Referer', `${FASTAPI_HOST}/`);
+
+    // (3) 브라우저 위장 (Bot 차단 우회)
+    // Cloudflare Workers라는 User-Agent 대신 일반 크롬 브라우저인 척 합니다.
+    headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    // (4) 불필요한 Cloudflare 헤더 제거 (선택사항: 서버 혼란 방지)
+    headers.delete('cf-connecting-ip');
+    headers.delete('cf-ipcountry');
+    headers.delete('cf-ray');
+    headers.delete('cf-visitor');
+
     const fetchOptions = {
       method: c.req.method,
-      headers: c.req.header(),
+      headers: headers,
+      redirect: 'manual' 
     };
 
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
@@ -37,13 +55,26 @@ app.all('/api/*', async (c) => {
 
     const response = await fetch(targetUrl, fetchOptions);
 
+    // 3. 응답 처리
+    // 리다이렉트가 오면 주소를 Hono 주소로 바꿔줍니다.
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('Location');
+      if (location) {
+        const newLocation = location.replace(FASTAPI_HOST, '/api');
+        const newResp = new Response(response.body, response);
+        newResp.headers.set('Location', newLocation);
+        return newResp;
+      }
+    }
+
     return new Response(response.body, {
       status: response.status,
       headers: response.headers,
     });
+
   } catch (error) {
-    console.error("❌ FastAPI Proxy Error:", error);
-    return c.json({ error: "Backend Server Error", details: error.message }, 502);
+    console.error("❌ Proxy Error:", error);
+    return c.json({ error: "Backend Connection Error", details: error.message }, 502);
   }
 });
 

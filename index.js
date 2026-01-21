@@ -3,89 +3,54 @@ import { cors } from 'hono/cors'
 
 const app = new Hono()
 
-// 1. 미들웨어: CORS 설정
+// CORS 설정
 app.use('/*', cors())
 
-// 2. 기본 라우트
 app.get('/', (c) => {
-  return c.text('Hello! This is pure JavaScript on Cloudflare Workers with Gemini.')
+  return c.redirect('https://musclecat-studio.com')
 })
 
-// 3. [핵심] 포춘쿠키 + Gemini 번역 API
-app.get('/fortune', async (c) => {
-  const API_KEY = c.env.GOOGLE_API_KEY
+app.all('/api/*', async (c) => {
+  // 1. 내 FastAPI 서버 주소 (http여도 상관없음)
+  const FASTAPI_URL = "http://210.114.17.65:8001/"; // 개발자님의 리눅스 서버 IP로 변경
   
+  // 2. 요청 경로 재구성
+  // 예: Hono로 "/api/users" 요청이 오면 -> FastAPI "/users"로 보낼지, "/api/users"로 보낼지 결정
+  // 여기서는 "/api"를 그대로 유지해서 보낸다고 가정합니다.
+  const url = new URL(c.req.url);
+  const targetUrl = `${FASTAPI_URL}${url.pathname}${url.search}`;
+
+  // 3. FastAPI로 요청 전달 (Proxy)
   try {
-    // 1단계: 영어 명언 가져오기 (Advice Slip API)
-    const adviceResponse = await fetch('https://api.adviceslip.com/advice')
-    if (!adviceResponse.ok) throw new Error('Advice API Error')
-    const adviceData = await adviceResponse.json()
-    const originalText = adviceData.slip.advice
+    const response = await fetch(targetUrl, {
+      method: c.req.method,
+      headers: c.req.header(), // 클라이언트가 보낸 헤더(인증 등) 그대로 전달
+      body: c.req.raw ? c.req.raw : null, // POST Body가 있다면 전달
+    });
 
-    // 2단계: Gemini에게 번역 요청
-    // 모델: gemini-2.5-flash-lite (속도가 빠르고 비용 효율적임)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${API_KEY}`
+    // 4. FastAPI의 응답을 그대로 클라이언트에게 반환
+    // (여기서 Hono의 CORS 미들웨어가 자동으로 CORS 헤더를 붙여줍니다)
+    return new Response(response.body, {
+      status: response.status,
+      headers: response.headers,
+    });
     
-    const geminiBody = {
-      contents: [{
-        parts: [{
-          // 단순 직역보다 '한 줄 운세'처럼 번역하도록 지시
-          text: `Translate the following sentence into Korean efficiently and naturally, like a one-line fortune. Output only the Korean text without quotes.\n\nSentence: "${originalText}"`
-        }]
-      }]
-    }
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiBody)
-    })
-
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text()
-      throw new Error(`Gemini API Error: ${errText}`)
-    }
-
-    const geminiData = await geminiResponse.json()
-    
-    // 응답에서 텍스트 추출
-    const koreanMessage = geminiData.candidates[0].content.parts[0].text.trim()
-
-    // 3단계: 결과 반환 (한국어 메시지만)
-    return c.text(koreanMessage)
-
-  } catch (err) {
-    console.error(err)
-    return c.json({ 
-      error: '명언을 가져오는 중 문제가 발생했습니다.',
-      detail: err.message 
-    }, 500)
+  } catch (error) {
+    console.error("FastAPI Proxy Error:", error);
+    return c.json({ error: "Backend Server Error" }, 502);
   }
-})
-
-// 4. 기존 사용자 조회 API (유지)
-app.get('/users/:id', (c) => {
-  const userId = c.req.param('id')
-  const userRole = c.req.query('role') || 'member'
-
-  return c.json({
-    message: `유저 ${userId} 정보 조회`,
-    role: userRole,
-    platform: 'Cloudflare Workers (JS)',
-    timestamp: Date.now()
-  })
-})
-
-// 5. POST 요청 처리 (유지)
-app.post('/api/data', async (c) => {
-  try {
-    const body = await c.req.json()
-    return c.json({ success: true, received: body }, 201)
-  } catch (err) {
-    return c.json({ error: 'Invalid JSON' }, 400)
-  }
-})
+});
 
 app.notFound((c) => c.json({ error: 'Not Found' }, 404))
 
-export default app
+export default {
+  fetch: (request, env, ctx) => {
+    return app.fetch(request, env, ctx);
+  },
+
+  // Cron 스케줄러
+  async scheduled(event, env, ctx) {
+    console.log("⏰ [Cron Triggered] 크론 작업이 시작되었습니다!");
+    // 여기에 주기적으로 실행할 작업을 추가하세요.
+  }
+}

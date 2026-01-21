@@ -12,7 +12,7 @@ app.get('/', (c) => {
 
 app.all('/api/*', async (c) => {
   // ⚠️ 실제 리눅스 서버 IP로 꼭 변경해주세요!
-  const FASTAPI_URL = "http://210.114.17.65:8001"; 
+  const FASTAPI_URL = "http://musclecat3.cafe24.com:8001"; 
   
   const url = new URL(c.req.url);
   
@@ -50,7 +50,7 @@ app.all('/api/*', async (c) => {
 // 5. [신규] Swagger UI 문제 해결 (openapi.json 프록시)
 // 브라우저가 /openapi.json을 루트에서 찾을 때 FastAPI로 연결해줍니다.
 app.get('/openapi.json', async (c) => {
-  const FASTAPI_URL = "http://210.114.17.65:8001"; // 위와 동일한 IP
+  const FASTAPI_URL = "http://musclecat3.cafe24.com:8001"; // 위와 동일한 IP
   const targetUrl = `${FASTAPI_URL}/openapi.json`;
   
   console.log(`📡 [Swagger Log] openapi.json 요청 --> ${targetUrl}`);

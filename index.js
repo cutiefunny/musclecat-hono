@@ -22,22 +22,21 @@ app.all('/api/*', async (c) => {
   console.log(`📡 [Proxy Log] ${url.pathname} --> ${targetUrl}`);
 
   try {
-    // 1. 클라이언트의 헤더를 가져옵니다.
+    // 1. 헤더 복사
     const headers = new Headers(c.req.header());
 
-    // 2. [핵심] Cafe24 서버를 속이기 위한 '스텔스' 헤더 설정
-    // (1) 호스트 설정 (필수)
-    headers.set('Host', new URL(FASTAPI_HOST).host);
+    // 2. [핵심 해결책] Host 헤더를 과감하게 '삭제'합니다.
+    // 이렇게 하면 fetch가 targetUrl(musclecat3...)을 보고 
+    // 알아서 가장 정확한 Host 헤더를 다시 생성해서 붙입니다.
+    headers.delete('Host'); 
+    headers.delete('host'); // 소문자도 확실히 삭제
     
-    // (2) 출처 위장 (Hotlink 차단 우회)
+    // 3. Cafe24 차단 방지용 헤더 위장
     headers.set('Origin', FASTAPI_HOST);
     headers.set('Referer', `${FASTAPI_HOST}/`);
-
-    // (3) 브라우저 위장 (Bot 차단 우회)
-    // Cloudflare Workers라는 User-Agent 대신 일반 크롬 브라우저인 척 합니다.
     headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // (4) 불필요한 Cloudflare 헤더 제거 (선택사항: 서버 혼란 방지)
+    // 4. 불필요한 Cloudflare 헤더 청소 (선택사항)
     headers.delete('cf-connecting-ip');
     headers.delete('cf-ipcountry');
     headers.delete('cf-ray');
@@ -55,8 +54,7 @@ app.all('/api/*', async (c) => {
 
     const response = await fetch(targetUrl, fetchOptions);
 
-    // 3. 응답 처리
-    // 리다이렉트가 오면 주소를 Hono 주소로 바꿔줍니다.
+    // 5. 응답 처리
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('Location');
       if (location) {

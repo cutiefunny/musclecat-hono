@@ -8,8 +8,8 @@ app.use('/*', cors())
 
 app.get('/', (c) => c.json({ message: 'musclecat backend api server' }))
 
-app.get('/test', (c) => c.json({ result: 'test response done!' }))
-app.get('/test2', (c) => c.json({ result: 'api response in group' }))
+app.get('/test', (c) => c.json({ result: 'continue!' }))
+app.get('/test2', (c) => c.json({ result: 'stop!' }))
 
 app.notFound((c) => c.json({ error: 'Not Found' }, 404))
 
